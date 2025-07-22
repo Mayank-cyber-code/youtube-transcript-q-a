@@ -5,7 +5,6 @@ langchain-openai
 fastapi
 uvicorn
 gunicorn
-youtube-transcript-api
 tiktoken
 wikipedia
 python-dotenv
@@ -13,3 +12,4 @@ faiss-cpu
 deep-translator
 pytube
 requests
+youtube-transcript-api>=1.7.0
