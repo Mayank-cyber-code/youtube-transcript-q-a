@@ -1,41 +1,133 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-import os
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Transcript Q&A</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 2rem auto;
+            padding: 1rem;
+            background: #f9f9f9;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin: 1rem 0 0.5rem;
+        }
+        input, textarea, button {
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        button {
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            margin-top: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #response {
+            margin-top: 1rem;
+            white-space: pre-wrap;
+            background: #fff;
+            padding: 1rem;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            min-height: 60px;
+        }
+        #loading {
+            color: #666;
+            text-align: center;
+            margin-top: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>YouTube Transcript Q&A</h1>
 
-from qa_engine import YouTubeConversationalQA
+    <label for="video_url">YouTube Video URL:</label>
+    <input type="text" id="video_url" placeholder="https://www.youtube.com/watch?v=..." />
 
-app = FastAPI()
-qa = YouTubeConversationalQA()
+    <label for="question">Ask a question about this video:</label>
+    <textarea id="question" placeholder="Type your question here..."></textarea>
 
-# Allow CORS for web/extension access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Use strict origins for production!
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    <button id="ask_btn" disabled>Ask</button>
+    <div id="loading">Loading...</div>
+    <div id="response"></div>
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+    <script>
+        const backendUrl = "/api/ask"; // relative URL assuming backend serves frontend
 
-@app.get("/")
-def serve_frontend():
-    return FileResponse("static/frontend.html")
+        const videoUrlInput = document.getElementById("video_url");
+        const questionInput = document.getElementById("question");
+        const askBtn = document.getElementById("ask_btn");
+        const responseDiv = document.getElementById("response");
+        const loadingDiv = document.getElementById("loading");
 
-@app.post('/api/ask')
-async def ask(request: Request):
-    data = await request.json()
-    video_url = data['video_url']
-    question = data['question']
-    answer = qa.ask(video_url, question)
-    return {"answer": answer}
+        function updateButtonState() {
+            askBtn.disabled = !videoUrlInput.value.trim() || !questionInput.value.trim();
+        }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        reload=True
-    )
+        videoUrlInput.addEventListener("input", updateButtonState);
+        questionInput.addEventListener("input", updateButtonState);
+
+        askBtn.addEventListener("click", async () => {
+            const video_url = videoUrlInput.value.trim();
+            const question = questionInput.value.trim();
+
+            if (!video_url || !question) return; // extra guard
+
+            responseDiv.textContent = "";
+            loadingDiv.style.display = "block";
+            askBtn.disabled = true;
+
+            try {
+                const res = await fetch(backendUrl, {
+                    method: "POST",
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ video_url, question })
+                });
+                const data = await res.json();
+
+                if (data.answer) {
+                    responseDiv.textContent = data.answer;
+                } else if (data.error) {
+                    responseDiv.textContent = "Error: " + data.error;
+                } else {
+                    responseDiv.textContent = "No answer received.";
+                }
+            } catch (err) {
+                responseDiv.textContent = "Request failed: " + err;
+            } finally {
+                loadingDiv.style.display = "none";
+                askBtn.disabled = false;
+            }
+        });
+
+        // Initialize button state
+        updateButtonState();
+    </script>
+</body>
+</html>
