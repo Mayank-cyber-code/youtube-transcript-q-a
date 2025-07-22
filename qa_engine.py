@@ -4,7 +4,11 @@ import logging
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    TranscriptsDisabled,
+    NoTranscriptFound,
+)
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -23,12 +27,13 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OpenAI API key not set! Please set in the environment or .env file.")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
+
 
 def extract_video_id(url: str) -> str:
     patterns = [
-        r'(?:v=|\/videos\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})'
+        r"(?:v=|\/videos\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})",
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
@@ -36,50 +41,71 @@ def extract_video_id(url: str) -> str:
             return match.group(1)
     raise ValueError("No valid video ID found in URL")
 
+
 def translate_to_english(text: str) -> str:
     try:
-        detected = GoogleTranslator(source='auto', target='en').detect(text[:160])
-        if detected and detected.lower() != 'en':
-            translated = GoogleTranslator(source='auto', target='en').translate(text)
+        detected = GoogleTranslator(source="auto", target="en").detect(text[:160])
+        if detected and detected.lower() != "en":
+            translated = GoogleTranslator(source="auto", target="en").translate(text)
             return translated
     except Exception as e:
         logger.warning(f"Translation detection/translation failed: {e}")
     return text
 
+
 def get_transcript_docs(video_id: str, prefer_languages=None) -> Optional[List[Document]]:
     """
-    Attempts to fetch YouTube transcript text for the given video_id.
-    Tries preferred languages first, then any language.
-    Returns transcript as a list of a single LangChain Document or None if not found.
+    Fetch transcript for video_id using youtube-transcript-api 1.2.0 compatible method.
+    Tries preferred languages first, then falls back to any available transcript.
     """
     if prefer_languages is None:
         prefer_languages = ["en", "en-US", "en-IN", "hi"]
-    try_orders = [prefer_languages, []]  # first try preferred languages, then unrestricted
 
-    for langs in try_orders:
-        try:
-            logger.info(f"Trying to get transcript for video_id={video_id} with langs={langs}")
-            if langs:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
-            else:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id)
-            logger.info(f"Transcript length: {len(transcript)} blocks")
-            text = " ".join([d['text'] for d in transcript])
-            text_en = translate_to_english(text)
-            return [Document(page_content=text_en)]
-        except (NoTranscriptFound, TranscriptsDisabled) as e:
-            logger.warning(f"Transcript not found or disabled for lang(s) {langs}: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Error loading transcript: {e}")
-            continue
-    logger.warning("No transcripts found after trying all language options")
+    try:
+        transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+
+        # Try to find transcript matching preferred languages
+        for lang in prefer_languages:
+            try:
+                transcript = transcripts.find_transcript([lang])
+                if transcript:
+                    break
+            except Exception:
+                continue
+
+        # If no preferred language transcript found, try first available transcript
+        if transcript is None:
+            # Try to get manually created transcripts (priority)
+            try:
+                transcript = transcripts.find_manually_created_transcript(
+                    transcripts._manually_created_transcripts
+                )
+            except Exception:
+                # If no manually created transcripts found, get the first auto-generated one if available
+                try:
+                    transcript = transcripts.find_generated_transcript(
+                        transcripts._generated_transcripts
+                    )
+                except Exception:
+                    transcript = None
+
+        if transcript is None:
+            raise NoTranscriptFound(f"No transcript found for video id: {video_id}")
+
+        transcript_fetch = transcript.fetch()  # returns list of dicts with 'text' key
+        logger.info(f"Fetched transcript with {len(transcript_fetch)} entries")
+        text = " ".join([d["text"] for d in transcript_fetch])
+        text_en = translate_to_english(text)
+        return [Document(page_content=text_en)]
+    except (NoTranscriptFound, TranscriptsDisabled) as e:
+        logger.warning(f"Transcript not found or disabled: {e}")
+    except Exception as e:
+        logger.error(f"Error loading transcript: {e}")
     return None
 
+
 def get_video_title(youtube_url: str) -> Optional[str]:
-    """
-    Attempts to get YouTube video title via PyTube and falls back to HTML scraping.
-    """
     try:
         video_id = extract_video_id(youtube_url)
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -87,12 +113,12 @@ def get_video_title(youtube_url: str) -> Optional[str]:
         return yt.title
     except Exception as e:
         logger.warning(f"Could not fetch video title with pytube: {e}")
-        # Fallback: scrape page HTML title tag
+        # Try HTML parse fallback
         try:
             page_url = f"https://www.youtube.com/watch?v={extract_video_id(youtube_url)}"
             r = requests.get(page_url, timeout=8)
             if r.status_code == 200:
-                m = re.search(r'<title>(.*?) - YouTube</title>', r.text)
+                m = re.search(r"<title>(.*?) - YouTube</title>", r.text)
                 if m:
                     title = html.unescape(m.group(1)).strip()
                     return title
@@ -100,17 +126,15 @@ def get_video_title(youtube_url: str) -> Optional[str]:
             logger.warning(f"Could not fetch/parse video title from HTML: {e2}")
     return None
 
+
 def clean_video_title_for_wikipedia(title: str) -> str:
     for sep in ["|", "-"]:
         if sep in title:
             title = title.split(sep)[0]
     return title.strip()
 
+
 def wikipedia_search(query: str) -> Optional[str]:
-    """
-    Attempts to fetch a short Wikipedia summary for the query.
-    Handles disambiguation and page errors gracefully.
-    """
     try:
         summary = wikipedia.summary(query, sentences=2)
         return f"According to Wikipedia:\n{summary}"
@@ -126,8 +150,10 @@ def wikipedia_search(query: str) -> Optional[str]:
         logger.warning(f"Wikipedia search error: {ex}")
         return None
 
+
 def web_search_links(query: str) -> str:
     import urllib.parse
+
     q_url = urllib.parse.quote(query)
     return (
         f"Sorry, I couldn't answer from the transcript or Wikipedia.\n"
@@ -136,11 +162,8 @@ def web_search_links(query: str) -> str:
         f"- [DuckDuckGo](https://duckduckgo.com/?q={q_url})"
     )
 
+
 def clean_for_wikipedia(query: str) -> str:
-    """
-    Removes common question words to clean query for Wikipedia.
-    Example: "Who is Albert Einstein?" -> "Albert Einstein"
-    """
     query = query.strip()
     match = re.match(
         r"(who|what|when|where|why|how)\s+(is|are|was|were|do|does|did|has|have|can|could|should|would)?\s*(.*)",
@@ -152,7 +175,7 @@ def clean_for_wikipedia(query: str) -> str:
         return topic
     return query
 
-# Patterns indicating vague or incomplete answers
+
 VAGUE_PATTERNS = [
     "do not like each other",
     "i don't know",
@@ -175,10 +198,8 @@ VAGUE_PATTERNS = [
     "unfortunately",
 ]
 
+
 def is_summary_question(question: str) -> bool:
-    """
-    Checks if the question is seeking a summary of the video.
-    """
     qs = question.lower()
     return (
         "what is this video about" in qs
@@ -188,17 +209,13 @@ def is_summary_question(question: str) -> bool:
         or "summary" in qs
     )
 
+
 class YouTubeConversationalQA:
     def __init__(self, model="gpt-3.5-turbo"):
-        self.embeddings = OpenAIEmbeddings(
-            openai_api_key=OPENAI_API_KEY,
-        )
+        self.embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         self.vectorstore_cache = {}
         self.llm = ChatOpenAI(
-            openai_api_key=OPENAI_API_KEY,
-            model=model,
-            temperature=0.4,
-            max_tokens=512,
+            openai_api_key=OPENAI_API_KEY, model=model, temperature=0.4, max_tokens=512
         )
         self.convs = {}
 
@@ -247,8 +264,9 @@ class YouTubeConversationalQA:
             try:
                 if is_summary_question(question):
                     custom_template = (
-                        "Given the following video transcript, briefly summarize the main topic or content of this video. "
-                        "Only use context, do NOT speculate. Transcript: {context}\nIn English, answer in 2-4 sentences."
+                        "Given the following video transcript, briefly summarize the main topic or content "
+                        "of this video. Only use context, do NOT speculate. Transcript: {context}\n"
+                        "In English, answer in 2-4 sentences."
                     )
                     result = chain.invoke({"question": custom_template})
                 else:
@@ -264,17 +282,17 @@ class YouTubeConversationalQA:
         if context_answer and not self.is_incomplete(context_answer):
             return context_answer
 
-        # Fallback: try title for Wikipedia search, then cleaned/shortened title if needed
         title_q = None
         if fallback_to_title:
             title_q = get_video_title(video_url)
             search_term = title_q if title_q else question
             wiki_ans = wikipedia_search(search_term)
-            # Try again with cleaned/shortened title:
+
             if (not wiki_ans or self.is_incomplete(wiki_ans)) and title_q:
                 short_search = clean_video_title_for_wikipedia(title_q)
                 if short_search != search_term:
                     wiki_ans = wikipedia_search(short_search)
+
             if wiki_ans and not self.is_incomplete(wiki_ans):
                 return wiki_ans
 
@@ -290,12 +308,15 @@ class YouTubeConversationalQA:
 
         return web_search_links(question)
 
+
 if __name__ == "__main__":
     print("Welcome to YouTube Q&A! Paste any public YouTube video URL.")
     qa = YouTubeConversationalQA()
     url = input("YouTube video URL: ")
     session = "user1"
-    print("You can ask multiple questions about this video! (Press Enter on empty line to exit)\n")
+    print(
+        "You can ask multiple questions about this video! (Press Enter on empty line to exit)\n"
+    )
     while True:
         q = input("Your question (or just Enter to exit): ")
         if not q.strip():
