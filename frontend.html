@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Q&A Web</title>
+  <style>
+    body { max-width: 420px; margin: 40px auto; font-family: sans-serif; background: #fafcff; }
+    h2 { margin-bottom: 18px; }
+    label { display:block; margin-top: 12px;}
+    input, button { width:100%; margin:6px 0; padding: 8px; }
+    #result { margin-top:16px; background: #eef3fb; min-height:52px; padding:10px;}
+    button { background: #2979ff; border:0; color: #fff; font-weight:600; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h2>YouTube Video Q&A</h2>
+  <form id="qaForm">
+    <label>
+      YouTube Video URL:
+      <input id="video_url" required placeholder="https://www.youtube.com/watch?v=..." />
+    </label>
+    <label>
+      Your Question:
+      <input id="question" required placeholder="Ask a question..." />
+    </label>
+    <button type="submit">Get Answer</button>
+  </form>
+  <div id="result"></div>
+  <script>
+    document.getElementById("qaForm").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      const video_url = document.getElementById("video_url").value.trim();
+      const question = document.getElementById("question").value.trim();
+      const resultElem = document.getElementById("result");
+      if(!video_url || !question) {
+        resultElem.textContent = "Please fill in video URL and question.";
+        return;
+      }
+      resultElem.textContent = "Loading...";
+      try {
+        const response = await fetch("/api/ask", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({video_url, question})
+        });
+        const data = await response.json();
+        resultElem.textContent = data.answer;
+      } catch(err) {
+        resultElem.textContent = "Error: " + err;
+      }
+    });
+  </script>
+</body>
+</html>
