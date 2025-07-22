@@ -12,4 +12,4 @@ faiss-cpu
 deep-translator
 pytube
 requests
-youtube-transcript-api
+git+https://github.com/jdepoix/youtube-transcript-api.git@master
