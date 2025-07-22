@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Q&A</title>
+    <style>
+        body { font-family: sans-serif; width: 280px; margin: 16px;}
+        .hidden {display: none;}
+        input, button { width: 100%; margin-bottom: 10px; padding: 8px;}
+        #result { white-space: pre-wrap; background: #f7f7f7; padding: 8px; min-height: 50px;}
+    </style>
+</head>
+<body>
+    <div id="video_url_group" style="display:none;">
+        <input id="video_url" placeholder="YouTube URL" disabled />
+    </div>
+    <input id="question" placeholder="Ask a question about this video" />
+    <button id="ask_btn" disabled>Ask</button>
+    <div id="result"></div>
+    <script src="popup.js"></script>
+</body>
+</html>

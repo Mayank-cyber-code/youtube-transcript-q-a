@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Transcript QA",
+  "version": "1.0",
+  "description": "Ask questions about the current YouTube video!",
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["tabs"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
+

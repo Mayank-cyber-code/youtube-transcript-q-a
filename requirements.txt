@@ -1,0 +1,15 @@
+openai
+langchain
+langchain-community
+langchain-openai
+fastapi
+uvicorn
+gunicorn
+youtube-transcript-api
+tiktoken
+wikipedia
+python-dotenv
+faiss-cpu
+deep-translator
+pytube
+requests

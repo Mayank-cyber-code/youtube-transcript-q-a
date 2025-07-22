@@ -1,0 +1,31 @@
+body {
+    width: 300px;
+    padding: 10px;
+    font-family: Arial, sans-serif;
+}
+
+input {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+}
+
+button {
+    width: 100%;
+    padding: 8px;
+    background-color: #4285F4;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+#response {
+    margin-top: 10px;
+    white-space: pre-wrap;
+}
+
+#loading {
+    color: #666;
+    text-align: center;
+    margin: 10px 0;
+}
