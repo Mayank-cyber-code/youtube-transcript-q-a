@@ -47,23 +47,39 @@ def translate_to_english(text: str) -> str:
     return text
 
 def get_transcript_docs(video_id: str, prefer_languages=None) -> Optional[List[Document]]:
+    """
+    Attempts to fetch YouTube transcript text for the given video_id.
+    Tries preferred languages first, then any language.
+    Returns transcript as a list of a single LangChain Document or None if not found.
+    """
     if prefer_languages is None:
         prefer_languages = ["en", "en-US", "en-IN", "hi"]
-    try_orders = [prefer_languages, []]
+    try_orders = [prefer_languages, []]  # first try preferred languages, then unrestricted
+
     for langs in try_orders:
         try:
-            transcript = (YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
-                          if langs else YouTubeTranscriptApi.get_transcript(video_id))
+            logger.info(f"Trying to get transcript for video_id={video_id} with langs={langs}")
+            if langs:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
+            else:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            logger.info(f"Transcript length: {len(transcript)} blocks")
             text = " ".join([d['text'] for d in transcript])
             text_en = translate_to_english(text)
             return [Document(page_content=text_en)]
-        except (NoTranscriptFound, TranscriptsDisabled):
+        except (NoTranscriptFound, TranscriptsDisabled) as e:
+            logger.warning(f"Transcript not found or disabled for lang(s) {langs}: {e}")
             continue
         except Exception as e:
             logger.error(f"Error loading transcript: {e}")
+            continue
+    logger.warning("No transcripts found after trying all language options")
     return None
 
 def get_video_title(youtube_url: str) -> Optional[str]:
+    """
+    Attempts to get YouTube video title via PyTube and falls back to HTML scraping.
+    """
     try:
         video_id = extract_video_id(youtube_url)
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -71,7 +87,7 @@ def get_video_title(youtube_url: str) -> Optional[str]:
         return yt.title
     except Exception as e:
         logger.warning(f"Could not fetch video title with pytube: {e}")
-        # Try HTML parse fallback
+        # Fallback: scrape page HTML title tag
         try:
             page_url = f"https://www.youtube.com/watch?v={extract_video_id(youtube_url)}"
             r = requests.get(page_url, timeout=8)
@@ -91,6 +107,10 @@ def clean_video_title_for_wikipedia(title: str) -> str:
     return title.strip()
 
 def wikipedia_search(query: str) -> Optional[str]:
+    """
+    Attempts to fetch a short Wikipedia summary for the query.
+    Handles disambiguation and page errors gracefully.
+    """
     try:
         summary = wikipedia.summary(query, sentences=2)
         return f"According to Wikipedia:\n{summary}"
@@ -117,21 +137,48 @@ def web_search_links(query: str) -> str:
     )
 
 def clean_for_wikipedia(query: str) -> str:
+    """
+    Removes common question words to clean query for Wikipedia.
+    Example: "Who is Albert Einstein?" -> "Albert Einstein"
+    """
     query = query.strip()
-    match = re.match(r"(who|what|when|where|why|how)\s+(is|are|was|were|do|does|did|has|have|can|could|should|would)?\s*(.*)", query, flags=re.IGNORECASE)
+    match = re.match(
+        r"(who|what|when|where|why|how)\s+(is|are|was|were|do|does|did|has|have|can|could|should|would)?\s*(.*)",
+        query,
+        flags=re.IGNORECASE,
+    )
     if match:
         topic = match.group(3).strip(" .?")
         return topic
     return query
 
+# Patterns indicating vague or incomplete answers
 VAGUE_PATTERNS = [
-    "do not like each other", "i don't know", "i do not know", "not mentioned", "not provided",
-    "not stated", "no idea", "no information", "no details", "insufficient information",
-    "unclear", "unable to determine", "cannot determine", "can't say", "no context", "context not found",
-    "the transcript does not", "sorry", "unfortunately"
+    "do not like each other",
+    "i don't know",
+    "i do not know",
+    "not mentioned",
+    "not provided",
+    "not stated",
+    "no idea",
+    "no information",
+    "no details",
+    "insufficient information",
+    "unclear",
+    "unable to determine",
+    "cannot determine",
+    "can't say",
+    "no context",
+    "context not found",
+    "the transcript does not",
+    "sorry",
+    "unfortunately",
 ]
 
 def is_summary_question(question: str) -> bool:
+    """
+    Checks if the question is seeking a summary of the video.
+    """
     qs = question.lower()
     return (
         "what is this video about" in qs
@@ -151,7 +198,7 @@ class YouTubeConversationalQA:
             openai_api_key=OPENAI_API_KEY,
             model=model,
             temperature=0.4,
-            max_tokens=512
+            max_tokens=512,
         )
         self.convs = {}
 
@@ -160,10 +207,13 @@ class YouTubeConversationalQA:
         if video_id not in self.vectorstore_cache:
             docs = get_transcript_docs(video_id)
             if not docs:
+                logger.warning(f"No transcript docs found for video_id={video_id}")
                 return None
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000, chunk_overlap=200, length_function=len,
-                separators=["\n\n", "\n", ". ", " ", ""]
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+                separators=["\n\n", "\n", ". ", " ", ""],
             )
             splits = splitter.split_documents(docs)
             vdb = FAISS.from_documents(splits, self.embeddings)
@@ -171,15 +221,13 @@ class YouTubeConversationalQA:
         retriever = self.vectorstore_cache[video_id].as_retriever()
         if session_id not in self.convs:
             self.convs[session_id] = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="answer"
+                memory_key="chat_history", return_messages=True, output_key="answer"
             )
         return ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=retriever,
             memory=self.convs[session_id],
-            return_source_documents=False
+            return_source_documents=False,
         )
 
     def is_incomplete(self, text: str) -> bool:
@@ -198,7 +246,10 @@ class YouTubeConversationalQA:
         if chain is not None:
             try:
                 if is_summary_question(question):
-                    custom_template = "Given the following video transcript, briefly summarize the main topic or content of this video. Only use context, do NOT speculate. Transcript: {context}\nIn English, answer in 2-4 sentences."
+                    custom_template = (
+                        "Given the following video transcript, briefly summarize the main topic or content of this video. "
+                        "Only use context, do NOT speculate. Transcript: {context}\nIn English, answer in 2-4 sentences."
+                    )
                     result = chain.invoke({"question": custom_template})
                 else:
                     result = chain.invoke({"question": question})
