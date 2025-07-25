@@ -53,53 +53,21 @@ def translate_to_english(text: str) -> str:
     return text
 
 
-def get_transcript_docs(video_id: str, prefer_languages=None) -> Optional[List[Document]]:
+def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     """
-    Fetch transcript for video_id using youtube-transcript-api 1.2.0 compatible method.
-    Tries preferred languages first, then falls back to any available transcript.
+    Fetch transcript using direct get_transcript() call.
+    Falls back to Wikipedia if transcript is not available.
     """
-    if prefer_languages is None:
-        prefer_languages = ["en", "en-US", "en-IN", "hi"]
-
     try:
-        transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = None
-
-        # Try to find transcript matching preferred languages
-        for lang in prefer_languages:
-            try:
-                transcript = transcripts.find_transcript([lang])
-                if transcript:
-                    break
-            except Exception:
-                continue
-
-        # If no preferred language transcript found, try first available transcript
-        if transcript is None:
-            # Try to get manually created transcripts (priority)
-            try:
-                transcript = transcripts.find_manually_created_transcript(
-                    transcripts._manually_created_transcripts
-                )
-            except Exception:
-                # If no manually created transcripts found, get the first auto-generated one if available
-                try:
-                    transcript = transcripts.find_generated_transcript(
-                        transcripts._generated_transcripts
-                    )
-                except Exception:
-                    transcript = None
-
-        if transcript is None:
-            raise NoTranscriptFound(f"No transcript found for video id: {video_id}")
-
-        transcript_fetch = transcript.fetch()  # returns list of dicts with 'text' key
-        logger.info(f"Fetched transcript with {len(transcript_fetch)} entries")
-        text = " ".join([d["text"] for d in transcript_fetch])
+        transcript_entries = YouTubeTranscriptApi.get_transcript(
+            video_id, languages=["en", "en-US", "en-IN", "hi"]
+        )
+        logger.info(f"Fetched transcript with {len(transcript_entries)} entries")
+        text = " ".join([d["text"] for d in transcript_entries])
         text_en = translate_to_english(text)
         return [Document(page_content=text_en)]
-    except (NoTranscriptFound, TranscriptsDisabled) as e:
-        logger.warning(f"Transcript not found or disabled: {e}")
+    except (TranscriptsDisabled, NoTranscriptFound) as e:
+        logger.warning(f"Transcript could not be fetched: {e}. Falling back to Wikipedia.")
     except Exception as e:
         logger.error(f"Error loading transcript: {e}")
     return None
