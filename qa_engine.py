@@ -30,6 +30,14 @@ if not OPENAI_API_KEY:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
+# --- Proxy Settings for YouTubeTranscriptApi ---
+TOR_PROXY_IP = "16.170.237.7"  # Replace with your EC2 public IP
+TOR_PROXY_PORT = 9050
+proxies = {
+        "http": "socks5://16.170.237.7:9050",
+        "https": "socks5://16.170.237.7:9050",
+    }
+
 
 def extract_video_id(url: str) -> str:
     patterns = [
@@ -55,12 +63,12 @@ def translate_to_english(text: str) -> str:
 
 def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     """
-    Fetch transcript using direct get_transcript() call.
+    Fetch transcript using get_transcript() call via Tor proxy.
     Falls back to Wikipedia if transcript is not available.
     """
     try:
         transcript_entries = YouTubeTranscriptApi.get_transcript(
-            video_id, languages=["en", "en-US", "en-IN", "hi"]
+            video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=PROXIES
         )
         logger.info(f"Fetched transcript with {len(transcript_entries)} entries")
         text = " ".join([d["text"] for d in transcript_entries])
