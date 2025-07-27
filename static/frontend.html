@@ -55,6 +55,8 @@
             border-radius: 4px;
             border: 1px solid #ddd;
             min-height: 60px;
+            max-height: 300px;
+            overflow-y: auto;
         }
         #loading {
             color: #666;
@@ -74,11 +76,12 @@
     <textarea id="question" placeholder="Type your question here..."></textarea>
 
     <button id="ask_btn" disabled>Ask</button>
+
     <div id="loading">Loading...</div>
     <div id="response"></div>
 
     <script>
-        const backendUrl = "/api/ask"; // relative URL assuming backend serves frontend
+        const backendUrl = "/api/ask"; // relative path works if served by same backend origin
 
         const videoUrlInput = document.getElementById("video_url");
         const questionInput = document.getElementById("question");
@@ -86,6 +89,7 @@
         const responseDiv = document.getElementById("response");
         const loadingDiv = document.getElementById("loading");
 
+        // Enable button only when both inputs have text
         function updateButtonState() {
             askBtn.disabled = !videoUrlInput.value.trim() || !questionInput.value.trim();
         }
@@ -97,7 +101,7 @@
             const video_url = videoUrlInput.value.trim();
             const question = questionInput.value.trim();
 
-            if (!video_url || !question) return; // extra guard
+            if (!video_url || !question) return; // safeguard
 
             responseDiv.textContent = "";
             loadingDiv.style.display = "block";
@@ -109,24 +113,25 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ video_url, question })
                 });
+
                 const data = await res.json();
 
-                if (data.answer) {
+                if (!res.ok) {
+                    responseDiv.textContent = `Error: ${data.error || res.statusText}`;
+                } else if (data.answer) {
                     responseDiv.textContent = data.answer;
-                } else if (data.error) {
-                    responseDiv.textContent = "Error: " + data.error;
                 } else {
-                    responseDiv.textContent = "No answer received.";
+                    responseDiv.textContent = "No answer received from server.";
                 }
             } catch (err) {
-                responseDiv.textContent = "Request failed: " + err;
+                responseDiv.textContent = "Request failed: " + err.message;
             } finally {
                 loadingDiv.style.display = "none";
-                askBtn.disabled = false;
+                updateButtonState();
             }
         });
 
-        // Initialize button state
+        // Initialize state on page load
         updateButtonState();
     </script>
 </body>
