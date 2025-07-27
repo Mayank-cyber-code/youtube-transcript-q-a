@@ -9,3 +9,4 @@ wikipedia
 pytube
 requests[socks]
 faiss-cpu
+gunicorn
