@@ -31,12 +31,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger(__name__)
 
 # --- Proxy Settings for YouTubeTranscriptApi ---
-TOR_PROXY_IP = "16.170.237.7"  # Replace with your EC2 public IP
-TOR_PROXY_PORT = 9050
+TOR_PROXY_IP = os.getenv("PROXY_HOST", "16.170.237.7")  # Default AWS EC2 proxy IP
+TOR_PROXY_PORT = os.getenv("PROXY_PORT", "9050")       # Default port
+
 proxies = {
-        "http": "socks5://16.170.237.7:9050",
-        "https": "socks5://16.170.237.7:9050",
-    }
+    "http": f"socks5://{TOR_PROXY_IP}:{TOR_PROXY_PORT}",
+    "https": f"socks5://{TOR_PROXY_IP}:{TOR_PROXY_PORT}",
+}
 
 
 def extract_video_id(url: str) -> str:
@@ -68,7 +69,7 @@ def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     """
     try:
         transcript_entries = YouTubeTranscriptApi.get_transcript(
-            video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=PROXIES
+            video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
         logger.info(f"Fetched transcript with {len(transcript_entries)} entries")
         text = " ".join([d["text"] for d in transcript_entries])
