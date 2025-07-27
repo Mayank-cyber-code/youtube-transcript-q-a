@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 python-dotenv
-youtube-transcript-api
 langchain-community
 langchain-openai
 deep-translator
@@ -10,3 +9,4 @@ pytube
 requests[socks]
 faiss-cpu
 gunicorn
+youtube-transcript-api==0.6.0
