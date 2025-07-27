@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: youtube-transcript-qa
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false   # Set this in the Render dashboard for security!
+      - key: PROXY_HOST
+        sync: false   # Set your AWS proxy IP in dashboard, e.g., 16.170.237.7
+      - key: PROXY_PORT
+        sync: false   # Set your AWS proxy port in dashboard, e.g., 9050
+    autoDeploy: true
+    envVarsPreview:
+      - key: PORT
+        value: 10000
+    # Optional static content handling
+    staticPublishPath: static
