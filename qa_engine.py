@@ -64,10 +64,11 @@ def translate_to_english(text: str) -> str:
 
 def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     """
-    Fetch transcript using get_transcript() call via Tor proxy.
+    Fetch transcript using YouTubeTranscriptApi.get_transcript() with proxy.
     Falls back to Wikipedia if transcript is not available.
     """
     try:
+        # Use the static/class method get_transcript to fetch transcript entries
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
