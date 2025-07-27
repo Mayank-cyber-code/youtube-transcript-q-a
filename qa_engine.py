@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import html
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -19,7 +20,6 @@ from deep_translator import GoogleTranslator
 import wikipedia
 from pytube import YouTube
 import requests
-import html
 
 # --- ENV & LOGGING ---
 load_dotenv()
@@ -68,7 +68,6 @@ def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     Falls back to Wikipedia if transcript is not available.
     """
     try:
-        # Use the static/class method get_transcript to fetch transcript entries
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
@@ -241,12 +240,8 @@ class YouTubeConversationalQA:
         if chain is not None:
             try:
                 if is_summary_question(question):
-                    custom_template = (
-                        "Given the following video transcript, briefly summarize the main topic or content "
-                        "of this video. Only use context, do NOT speculate. Transcript: {context}\n"
-                        "In English, answer in 2-4 sentences."
-                    )
-                    result = chain.invoke({"question": custom_template})
+                    # Properly invoke the chain with question, no template substitution
+                    result = chain.invoke({"question": question})
                 else:
                     result = chain.invoke({"question": question})
                 context_answer = (result.get("answer", "") if result else "").strip()
@@ -257,9 +252,11 @@ class YouTubeConversationalQA:
         else:
             fallback_to_title = True
 
+        # Return if the transcript-based answer is complete / meaningful
         if context_answer and not self.is_incomplete(context_answer):
             return context_answer
 
+        # Fallback 1: Use video title to search Wikipedia
         title_q = None
         if fallback_to_title:
             title_q = get_video_title(video_url)
@@ -274,16 +271,19 @@ class YouTubeConversationalQA:
             if wiki_ans and not self.is_incomplete(wiki_ans):
                 return wiki_ans
 
+        # Fallback 2: Search Wikipedia with original question
         wiki_ans = wikipedia_search(question)
         if wiki_ans and not self.is_incomplete(wiki_ans):
             return wiki_ans
 
+        # Fallback 3: Clean question and try again
         topic = clean_for_wikipedia(question)
         if topic != question:
             wiki_ans2 = wikipedia_search(topic)
             if wiki_ans2 and not self.is_incomplete(wiki_ans2):
                 return wiki_ans2
 
+        # Final fallback: Provide web search links
         return web_search_links(question)
 
 
