@@ -9,33 +9,39 @@ from qa_engine import YouTubeConversationalQA
 app = FastAPI()
 qa = YouTubeConversationalQA()
 
-# Allow CORS for web/extension access
+# Allow CORS for web/extension access (consider restricting in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Use strict origins for production!
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
 @app.get("/")
 def serve_frontend():
     return FileResponse("static/frontend.html")
 
+
 @app.post('/api/ask')
 async def ask(request: Request):
     data = await request.json()
-    video_url = data['video_url']
-    question = data['question']
+    video_url = data.get('video_url')
+    question = data.get('question')
+    if not video_url or not question:
+        return {"error": "Missing video_url or question"}, 400
     answer = qa.ask(video_url, question)
     return {"answer": answer}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
-        reload=True
+        reload=True,  # Disable reload in production
     )
