@@ -4,6 +4,21 @@ import logging
 import html
 from typing import List, Optional, Tuple
 
+import requests
+
+# --- Patch requests to disable SSL verification globally ---
+_old_request = requests.Session.request
+
+
+def _request_no_ssl(self, *args, **kwargs):
+    kwargs['verify'] = False  # Disable SSL certificate verification
+    return _old_request(self, *args, **kwargs)
+
+
+requests.Session.request = _request_no_ssl
+
+# ----------------------------------
+
 from dotenv import load_dotenv
 from youtube_transcript_api import (
     YouTubeTranscriptApi,
@@ -19,7 +34,6 @@ from langchain.schema import Document
 from deep_translator import GoogleTranslator
 import wikipedia
 from pytube import YouTube
-import requests
 
 # --- ENV & LOGGING ---
 load_dotenv()
@@ -31,9 +45,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger(__name__)
 
 # --- ScraperAPI Proxy Settings ---
-# Use your ScraperAPI key here for the proxy.
 SCRAPERAPI_KEY = "840841f3a6e68c37a29881d961d5c481"
-# Format for HTTP/HTTPS proxy with ScraperAPI
 SCRAPERAPI_PROXY = f"http://scraperapi:{SCRAPERAPI_KEY}@proxy-server.scraperapi.com:8001"
 
 proxies = {
@@ -68,10 +80,8 @@ def get_transcript_docs(video_id: str) -> Tuple[Optional[List[Document]], bool]:
     """
     Fetch transcript using YouTubeTranscriptApi.get_transcript() with ScraperAPI proxy.
     Returns (documents list or None, boolean if transcript was fetched).
-    Falls back to None/False if transcript unavailable.
     """
     try:
-        # Pass proxies param to YouTubeTranscriptApi
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
@@ -91,9 +101,6 @@ def get_video_title(youtube_url: str) -> Optional[str]:
         video_id = extract_video_id(youtube_url)
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        # pytube does not support proxies directly
-        # fallback to HTML parse with requests using proxy
-
         try:
             yt = YouTube(clean_url)
             return yt.title
@@ -101,7 +108,7 @@ def get_video_title(youtube_url: str) -> Optional[str]:
             logger.warning(f"Could not fetch video title with pytube: {e}")
 
         try:
-            r = requests.get(clean_url, proxies=proxies, timeout=8)
+            r = requests.get(clean_url, proxies=proxies, timeout=8, verify=False)
             if r.status_code == 200:
                 m = re.search(r"<title>(.*?) - YouTube</title>", r.text)
                 if m:
@@ -211,7 +218,7 @@ class YouTubeConversationalQA:
         video_id = extract_video_id(video_url)
         if video_id not in self.vectorstore_cache:
             docs, transcript_ok = get_transcript_docs(video_id)
-            self.last_transcript_used = transcript_ok  # Save status here
+            self.last_transcript_used = transcript_ok
             if not docs:
                 logger.warning(f"No transcript docs found for video_id={video_id}")
                 return None
@@ -252,7 +259,6 @@ class YouTubeConversationalQA:
         if chain is not None:
             try:
                 if is_summary_question(question):
-                    # Properly invoke the chain with question, no template substitution
                     result = chain.invoke({"question": question})
                 else:
                     result = chain.invoke({"question": question})
@@ -264,7 +270,6 @@ class YouTubeConversationalQA:
         else:
             fallback_to_title = True
 
-        # Return if the transcript-based answer is complete / meaningful
         if context_answer and not self.is_incomplete(context_answer):
             return context_answer, self.last_transcript_used
 
