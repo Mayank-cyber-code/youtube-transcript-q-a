@@ -1,20 +1,15 @@
 services:
   - type: web
-    name: youtube-transcript-qa
-    env: python
-    plan: free
+    name: youtube-transcript-q-a
+    runtime: python
+    plan: free              # Or 'starter' or 'standard' as needed
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
     envVars:
       - key: OPENAI_API_KEY
-        sync: false   # Set this in the Render dashboard for security!
-      - key: PROXY_HOST
-        sync: false   # Set your AWS proxy IP in dashboard, e.g., 16.170.237.7
-      - key: PROXY_PORT
-        sync: false   # Set your AWS proxy port in dashboard, e.g., 9050
-    autoDeploy: true
-    envVarsPreview:
-      - key: PORT
-        value: 10000
-    # Optional static content handling
-    staticPublishPath: static
+        sync: false         # Set the value securely in the Render Dashboard or as a secret
+      - key: SCRAPERAPI_KEY
+        sync: false
+    # Optionally, set your python version (if needed):
+    # - key: PYTHON_VERSION
+    #   value: 3.10.12
