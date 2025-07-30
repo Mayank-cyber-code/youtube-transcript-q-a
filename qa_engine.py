@@ -79,23 +79,18 @@ def translate_to_english(text: str) -> str:
 
 
 def get_transcript_docs(video_id: str) -> Tuple[Optional[List[Document]], bool]:
-    """
-    Fetch transcript using YouTubeTranscriptApi.get_transcript() with ScraperAPI proxy.
-    Returns (documents list or None, boolean if transcript was fetched).
-    """
     try:
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
-        logger.info(f"Fetched transcript with {len(transcript_entries)} entries")
+        logger.info(f"Fetched {len(transcript_entries)} transcript entries.")
         text = " ".join([d["text"] for d in transcript_entries])
+        logger.info(f"Transcript snippet: {text[:200]}")
         text_en = translate_to_english(text)
         return [Document(page_content=text_en)], True
-    except (TranscriptsDisabled, NoTranscriptFound) as e:
-        logger.warning(f"Transcript could not be fetched: {e}.")
     except Exception as e:
-        logger.error(f"Error loading transcript: {e}")
-    return None, False
+        logger.warning(f"Failed to fetch transcript: {e}")
+        return None, False
 
 
 def get_video_title(youtube_url: str) -> Optional[str]:
@@ -132,40 +127,6 @@ def web_search_links(query: str) -> str:
         f"You can try searching the web:\n"
         f"- Google: https://www.google.com/search?q={q_url}\n"
         f"- DuckDuckGo: https://duckduckgo.com/?q={q_url}"
-    )
-
-
-VAGUE_PATTERNS = [
-    "do not like each other",
-    "i don't know",
-    "i do not know",
-    "not mentioned",
-    "not provided",
-    "not stated",
-    "no idea",
-    "no information",
-    "no details",
-    "insufficient information",
-    "unclear",
-    "unable to determine",
-    "cannot determine",
-    "can't say",
-    "no context",
-    "context not found",
-    "the transcript does not",
-    "sorry",
-    "unfortunately",
-]
-
-
-def is_summary_question(question: str) -> bool:
-    qs = question.lower()
-    return (
-        "what is this video about" in qs
-        or "what is the topic" in qs
-        or "main topic" in qs
-        or "summarize" in qs
-        or "summary" in qs
     )
 
 
@@ -208,14 +169,7 @@ class YouTubeConversationalQA:
             return_source_documents=False,
         )
 
-    def is_incomplete(self, text: str) -> bool:
-        if not text or len(text.strip()) < 8:
-            return True
-        lowered = text.lower()
-        for pat in VAGUE_PATTERNS:
-            if pat in lowered:
-                return True
-        return False
+    # removed is_incomplete method entirely (no filtering)
 
     def ask(self, video_url: str, question: str, session_id: str = "default") -> Tuple[str, bool]:
         context_answer = None
@@ -227,11 +181,11 @@ class YouTubeConversationalQA:
             except Exception as e:
                 logger.warning(f"Transcript-based QA failed: {e}")
                 context_answer = None
-        # Return if the transcript-based answer is complete / meaningful
-        if context_answer and not self.is_incomplete(context_answer):
+        # Return transcript-based answer even if short or vague
+        if context_answer:
             return context_answer, self.last_transcript_used
 
-        # No transcript or incomplete; final fallback: provide web search links
+        # No transcript or empty answer; final fallback: provide web search links
         return web_search_links(question), False
 
 
