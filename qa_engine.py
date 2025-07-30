@@ -30,13 +30,15 @@ if not OPENAI_API_KEY:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-# --- Proxy Settings for YouTubeTranscriptApi ---
-TOR_PROXY_IP = os.getenv("PROXY_HOST", "16.170.237.7")  # Default AWS EC2 proxy IP
-TOR_PROXY_PORT = os.getenv("PROXY_PORT", "9050")       # Default port
+# --- ScraperAPI Proxy Settings ---
+# Use your ScraperAPI key here for proxy.
+SCRAPERAPI_KEY = "840841f3a6e68c37a29881d961d5c481"
+# Format for HTTP/HTTPS proxy with ScraperAPI
+SCRAPERAPI_PROXY = f"http://scraperapi:{SCRAPERAPI_KEY}@proxy-server.scraperapi.com:8001"
 
 proxies = {
-    "http": f"socks5://{TOR_PROXY_IP}:{TOR_PROXY_PORT}",
-    "https": f"socks5://{TOR_PROXY_IP}:{TOR_PROXY_PORT}",
+    "http": SCRAPERAPI_PROXY,
+    "https": SCRAPERAPI_PROXY,
 }
 
 
@@ -64,10 +66,11 @@ def translate_to_english(text: str) -> str:
 
 def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
     """
-    Fetch transcript using YouTubeTranscriptApi.get_transcript() with proxy.
+    Fetch transcript using YouTubeTranscriptApi.get_transcript() with ScraperAPI proxy.
     Falls back to Wikipedia if transcript is not available.
     """
     try:
+        # Pass proxies to YouTubeTranscriptApi
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
@@ -86,14 +89,19 @@ def get_video_title(youtube_url: str) -> Optional[str]:
     try:
         video_id = extract_video_id(youtube_url)
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
-        yt = YouTube(clean_url)
-        return yt.title
-    except Exception as e:
-        logger.warning(f"Could not fetch video title with pytube: {e}")
-        # Try HTML parse fallback
+
+        # pytube does not support proxies directly
+        # workaround: set environment variable for proxies if needed
+        # Alternatively, fetch title via requests + parsing as fallback
         try:
-            page_url = f"https://www.youtube.com/watch?v={extract_video_id(youtube_url)}"
-            r = requests.get(page_url, timeout=8)
+            yt = YouTube(clean_url)
+            return yt.title
+        except Exception as e:
+            logger.warning(f"Could not fetch video title with pytube: {e}")
+
+        # Fallback: Use requests with ScraperAPI proxy to fetch page and parse title
+        try:
+            r = requests.get(clean_url, proxies=proxies, timeout=8)
             if r.status_code == 200:
                 m = re.search(r"<title>(.*?) - YouTube</title>", r.text)
                 if m:
@@ -101,6 +109,8 @@ def get_video_title(youtube_url: str) -> Optional[str]:
                     return title
         except Exception as e2:
             logger.warning(f"Could not fetch/parse video title from HTML: {e2}")
+    except Exception as e:
+        logger.warning(f"Failed extracting video title: {e}")
     return None
 
 
