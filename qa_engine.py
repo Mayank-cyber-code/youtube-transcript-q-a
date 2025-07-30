@@ -2,7 +2,7 @@ import os
 import re
 import logging
 import html
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
 from youtube_transcript_api import (
@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger(__name__)
 
 # --- ScraperAPI Proxy Settings ---
-# Use your ScraperAPI key here for proxy.
+# Use your ScraperAPI key here for the proxy.
 SCRAPERAPI_KEY = "840841f3a6e68c37a29881d961d5c481"
 # Format for HTTP/HTTPS proxy with ScraperAPI
 SCRAPERAPI_PROXY = f"http://scraperapi:{SCRAPERAPI_KEY}@proxy-server.scraperapi.com:8001"
@@ -64,25 +64,26 @@ def translate_to_english(text: str) -> str:
     return text
 
 
-def get_transcript_docs(video_id: str) -> Optional[List[Document]]:
+def get_transcript_docs(video_id: str) -> Tuple[Optional[List[Document]], bool]:
     """
     Fetch transcript using YouTubeTranscriptApi.get_transcript() with ScraperAPI proxy.
-    Falls back to Wikipedia if transcript is not available.
+    Returns (documents list or None, boolean if transcript was fetched).
+    Falls back to None/False if transcript unavailable.
     """
     try:
-        # Pass proxies to YouTubeTranscriptApi
+        # Pass proxies param to YouTubeTranscriptApi
         transcript_entries = YouTubeTranscriptApi.get_transcript(
             video_id, languages=["en", "en-US", "en-IN", "hi"], proxies=proxies
         )
         logger.info(f"Fetched transcript with {len(transcript_entries)} entries")
         text = " ".join([d["text"] for d in transcript_entries])
         text_en = translate_to_english(text)
-        return [Document(page_content=text_en)]
+        return [Document(page_content=text_en)], True
     except (TranscriptsDisabled, NoTranscriptFound) as e:
         logger.warning(f"Transcript could not be fetched: {e}. Falling back to Wikipedia.")
     except Exception as e:
         logger.error(f"Error loading transcript: {e}")
-    return None
+    return None, False
 
 
 def get_video_title(youtube_url: str) -> Optional[str]:
@@ -91,15 +92,14 @@ def get_video_title(youtube_url: str) -> Optional[str]:
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
 
         # pytube does not support proxies directly
-        # workaround: set environment variable for proxies if needed
-        # Alternatively, fetch title via requests + parsing as fallback
+        # fallback to HTML parse with requests using proxy
+
         try:
             yt = YouTube(clean_url)
             return yt.title
         except Exception as e:
             logger.warning(f"Could not fetch video title with pytube: {e}")
 
-        # Fallback: Use requests with ScraperAPI proxy to fetch page and parse title
         try:
             r = requests.get(clean_url, proxies=proxies, timeout=8)
             if r.status_code == 200:
@@ -145,8 +145,8 @@ def web_search_links(query: str) -> str:
     return (
         f"Sorry, I couldn't answer from the transcript or Wikipedia.\n"
         f"You can try searching the web:\n"
-        f"- [Google](https://www.google.com/search?q={q_url})\n"
-        f"- [DuckDuckGo](https://duckduckgo.com/?q={q_url})"
+        f"- Google: https://www.google.com/search?q={q_url}\n"
+        f"- DuckDuckGo: https://duckduckgo.com/?q={q_url}"
     )
 
 
@@ -205,11 +205,13 @@ class YouTubeConversationalQA:
             openai_api_key=OPENAI_API_KEY, model=model, temperature=0.4, max_tokens=512
         )
         self.convs = {}
+        self.last_transcript_used = False  # Tracks transcript fetch status
 
     def build_chain(self, video_url: str, session_id: str = "default"):
         video_id = extract_video_id(video_url)
         if video_id not in self.vectorstore_cache:
-            docs = get_transcript_docs(video_id)
+            docs, transcript_ok = get_transcript_docs(video_id)
+            self.last_transcript_used = transcript_ok  # Save status here
             if not docs:
                 logger.warning(f"No transcript docs found for video_id={video_id}")
                 return None
@@ -243,7 +245,7 @@ class YouTubeConversationalQA:
                 return True
         return False
 
-    def ask(self, video_url: str, question: str, session_id: str = "default") -> str:
+    def ask(self, video_url: str, question: str, session_id: str = "default") -> Tuple[str, bool]:
         fallback_to_title = False
         context_answer = None
         chain = self.build_chain(video_url, session_id)
@@ -264,7 +266,7 @@ class YouTubeConversationalQA:
 
         # Return if the transcript-based answer is complete / meaningful
         if context_answer and not self.is_incomplete(context_answer):
-            return context_answer
+            return context_answer, self.last_transcript_used
 
         # Fallback 1: Use video title to search Wikipedia
         title_q = None
@@ -279,22 +281,22 @@ class YouTubeConversationalQA:
                     wiki_ans = wikipedia_search(short_search)
 
             if wiki_ans and not self.is_incomplete(wiki_ans):
-                return wiki_ans
+                return wiki_ans, False
 
         # Fallback 2: Search Wikipedia with original question
         wiki_ans = wikipedia_search(question)
         if wiki_ans and not self.is_incomplete(wiki_ans):
-            return wiki_ans
+            return wiki_ans, False
 
         # Fallback 3: Clean question and try again
         topic = clean_for_wikipedia(question)
         if topic != question:
             wiki_ans2 = wikipedia_search(topic)
             if wiki_ans2 and not self.is_incomplete(wiki_ans2):
-                return wiki_ans2
+                return wiki_ans2, False
 
         # Final fallback: Provide web search links
-        return web_search_links(question)
+        return web_search_links(question), False
 
 
 if __name__ == "__main__":
@@ -310,7 +312,10 @@ if __name__ == "__main__":
         if not q.strip():
             break
         try:
-            ans = qa.ask(url, q, session)
-            print(f"\nAnswer: {ans}\n")
+            ans, used_transcript = qa.ask(url, q, session)
+            if used_transcript:
+                print(f"\n[ANSWERED FROM TRANSCRIPT]\nAnswer: {ans}\n")
+            else:
+                print(f"\n[NOT FROM TRANSCRIPT, fallback used]\nAnswer: {ans}\n")
         except Exception as e:
             print(f"Error: {e}")
