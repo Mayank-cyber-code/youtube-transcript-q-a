@@ -3,9 +3,10 @@ import re
 import logging
 import html
 from typing import List, Optional, Tuple
-
-import requests
 import urllib3
+import requests
+
+# --- Disable urllib3 InsecureRequestWarning globally ---
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- Patch requests to disable SSL verification globally ---
@@ -34,7 +35,6 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import Document
 from deep_translator import GoogleTranslator
-import wikipedia
 from pytube import YouTube
 
 # --- ENV & LOGGING ---
@@ -92,7 +92,7 @@ def get_transcript_docs(video_id: str) -> Tuple[Optional[List[Document]], bool]:
         text_en = translate_to_english(text)
         return [Document(page_content=text_en)], True
     except (TranscriptsDisabled, NoTranscriptFound) as e:
-        logger.warning(f"Transcript could not be fetched: {e}. Falling back to Wikipedia.")
+        logger.warning(f"Transcript could not be fetched: {e}.")
     except Exception as e:
         logger.error(f"Error loading transcript: {e}")
     return None, False
@@ -123,53 +123,16 @@ def get_video_title(youtube_url: str) -> Optional[str]:
     return None
 
 
-def clean_video_title_for_wikipedia(title: str) -> str:
-    for sep in ["|", "-"]:
-        if sep in title:
-            title = title.split(sep)[0]
-    return title.strip()
-
-
-def wikipedia_search(query: str) -> Optional[str]:
-    try:
-        summary = wikipedia.summary(query, sentences=2)
-        return f"According to Wikipedia:\n{summary}"
-    except wikipedia.exceptions.DisambiguationError as e:
-        try:
-            sub_summary = wikipedia.summary(e.options[0], sentences=2)
-            return f"According to Wikipedia ({e.options[0]}):\n{sub_summary}"
-        except Exception:
-            return None
-    except wikipedia.exceptions.PageError:
-        return None
-    except Exception as ex:
-        logger.warning(f"Wikipedia search error: {ex}")
-        return None
-
-
 def web_search_links(query: str) -> str:
     import urllib.parse
 
     q_url = urllib.parse.quote(query)
     return (
-        f"Sorry, I couldn't answer from the transcript or Wikipedia.\n"
+        f"Sorry, I couldn't answer from the transcript.\n"
         f"You can try searching the web:\n"
         f"- Google: https://www.google.com/search?q={q_url}\n"
         f"- DuckDuckGo: https://duckduckgo.com/?q={q_url}"
     )
-
-
-def clean_for_wikipedia(query: str) -> str:
-    query = query.strip()
-    match = re.match(
-        r"(who|what|when|where|why|how)\s+(is|are|was|were|do|does|did|has|have|can|could|should|would)?\s*(.*)",
-        query,
-        flags=re.IGNORECASE,
-    )
-    if match:
-        topic = match.group(3).strip(" .?")
-        return topic
-    return query
 
 
 VAGUE_PATTERNS = [
@@ -255,54 +218,20 @@ class YouTubeConversationalQA:
         return False
 
     def ask(self, video_url: str, question: str, session_id: str = "default") -> Tuple[str, bool]:
-        fallback_to_title = False
         context_answer = None
         chain = self.build_chain(video_url, session_id)
         if chain is not None:
             try:
-                if is_summary_question(question):
-                    result = chain.invoke({"question": question})
-                else:
-                    result = chain.invoke({"question": question})
+                result = chain.invoke({"question": question})
                 context_answer = (result.get("answer", "") if result else "").strip()
             except Exception as e:
                 logger.warning(f"Transcript-based QA failed: {e}")
                 context_answer = None
-                fallback_to_title = True
-        else:
-            fallback_to_title = True
-
+        # Return if the transcript-based answer is complete / meaningful
         if context_answer and not self.is_incomplete(context_answer):
             return context_answer, self.last_transcript_used
 
-        # Fallback 1: Use video title to search Wikipedia
-        title_q = None
-        if fallback_to_title:
-            title_q = get_video_title(video_url)
-            search_term = title_q if title_q else question
-            wiki_ans = wikipedia_search(search_term)
-
-            if (not wiki_ans or self.is_incomplete(wiki_ans)) and title_q:
-                short_search = clean_video_title_for_wikipedia(title_q)
-                if short_search != search_term:
-                    wiki_ans = wikipedia_search(short_search)
-
-            if wiki_ans and not self.is_incomplete(wiki_ans):
-                return wiki_ans, False
-
-        # Fallback 2: Search Wikipedia with original question
-        wiki_ans = wikipedia_search(question)
-        if wiki_ans and not self.is_incomplete(wiki_ans):
-            return wiki_ans, False
-
-        # Fallback 3: Clean question and try again
-        topic = clean_for_wikipedia(question)
-        if topic != question:
-            wiki_ans2 = wikipedia_search(topic)
-            if wiki_ans2 and not self.is_incomplete(wiki_ans2):
-                return wiki_ans2, False
-
-        # Final fallback: Provide web search links
+        # No transcript or incomplete; final fallback: provide web search links
         return web_search_links(question), False
 
 
