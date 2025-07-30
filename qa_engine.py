@@ -5,6 +5,8 @@ import html
 from typing import List, Optional, Tuple
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- Patch requests to disable SSL verification globally ---
 _old_request = requests.Session.request
